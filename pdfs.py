@@ -1,4 +1,3 @@
-
 import io
 import pandas as pd
 from typing import Optional
@@ -10,16 +9,18 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 def _money(x) -> str:
     try:
-        if pd.isna(x): return ""
+        if pd.isna(x):
+            return ""
         return f"£{float(x):,.2f}"
     except Exception:
         return ""
 
 def _dt(x) -> str:
-    if pd.isna(x) or x is None:
-        return ""
     try:
-        return pd.to_datetime(x).strftime("%d/%m/%Y %H:%M")
+        if pd.isna(x):
+            return ""
+        ts = pd.to_datetime(x)
+        return ts.strftime("%Y-%m-%d %H:%M")
     except Exception:
         return str(x)
 
@@ -45,11 +46,14 @@ def build_stylist_statement_pdf(
 
     story.append(Paragraph(f"<b>{brand} — {stylist}</b>", styles["Title"]))
     story.append(Spacer(1, 6))
-    story.append(Paragraph(f"Statement period: {period_start} to {period_end}", styles["Normal"]))
+    if period_start and period_end:
+        story.append(Paragraph(f"Statement period: {period_start} to {period_end}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     include_services = services_df is not None and not services_df.empty
+    include_clients = clients_df is not None and not clients_df.empty
 
+    # SERVICES SECTION (only if provided)
     if include_services:
         story.append(Paragraph(f"<b>{stylist} Services</b>", styles["Heading2"]))
         story.append(Spacer(1, 6))
@@ -71,20 +75,20 @@ def build_stylist_statement_pdf(
         ]))
         story.append(t)
 
-        story.append(Spacer(1, 6))
         tot_qty = int(services_df["Qty"].fillna(0).sum())
         tot_val = services_df["Total"].fillna(0).sum()
+        story.append(Spacer(1, 6))
         story.append(Paragraph(f"<b>Services total:</b> Qty {tot_qty}, Value {_money(tot_val)}", styles["Normal"]))
-
         story.append(Spacer(1, 12))
-        story.append(PageBreak())
 
-    story.append(Paragraph(f"<b>{stylist} Client Statement</b>", styles["Heading2"]))
-    story.append(Spacer(1, 6))
+        if include_clients:
+            story.append(PageBreak())
 
-    if clients_df is None or clients_df.empty:
-        story.append(Paragraph("No client statement data provided.", styles["Italic"]))
-    else:
+    # CLIENT SECTION (only if provided)
+    if include_clients:
+        story.append(Paragraph(f"<b>{stylist} Client Statement</b>", styles["Heading2"]))
+        story.append(Spacer(1, 6))
+
         cdf = clients_df.copy()
         deposit_col = "Deposit" if "Deposit" in cdf.columns else ("Prepaid" if "Prepaid" in cdf.columns else None)
         if deposit_col is None:
@@ -117,6 +121,9 @@ def build_stylist_statement_pdf(
             styles["Normal"]
         ))
 
+    # If neither section provided, show a polite message (shouldn't happen, but safe)
+    if not include_services and not include_clients:
+        story.append(Paragraph("No statement data provided for this stylist.", styles["Italic"]))
+
     doc.build(story)
     return buf.getvalue()
-

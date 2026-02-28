@@ -1,4 +1,4 @@
-# Touche Hair Caterham — Stylist Statements (Streamlit)
+# Touche Hairdressing — Stylist Statements (Streamlit)
 
 ## What it does
 - Builds Till + SE merged output using a raw Excel datetime join (DateKey + Client)

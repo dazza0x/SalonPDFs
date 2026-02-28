@@ -1,5 +1,6 @@
-
-import io, zipfile, hmac
+import io
+import zipfile
+import hmac
 import pandas as pd
 import streamlit as st
 
@@ -13,7 +14,7 @@ from transform import (
 )
 from pdfs import build_stylist_statement_pdf
 
-st.set_page_config(page_title="Touche Stylist Statements", page_icon="🧾", layout="centered")
+st.set_page_config(page_title="Touche Hairdressing — Statements", page_icon="🧾", layout="centered")
 
 def _maybe_require_password():
     # Password protection is mandatory for this app.
@@ -41,74 +42,108 @@ def _maybe_require_password():
 
 _maybe_require_password()
 
+brand = "Touche Hairdressing"
 
-brand = "Touche Hair Caterham"
-
-st.title("🧾 Touche Hair Caterham — Stylist Statements")
-st.write("Upload all three source reports (Till, SE, and Service Sales) plus the Services Cost file. Download Excel + a ZIP of per-stylist PDF statements.")
+st.title("🧾 Touche Hairdressing — Stylist Statements")
+st.write(
+    "Upload any of the following pairs:\n"
+    "- **Till + SE** → generates *Client Statements*\n"
+    "- **Service Sales + Service Cost** → generates *Services Statements*\n"
+    "- Upload **all 4** to generate both sections in the PDFs and in the Excel output."
+)
 
 with st.sidebar:
-    st.header("Inputs — Till + SE")
+    st.header("Inputs — Till + SE (optional)")
     till_file = st.file_uploader("Till Report (.xls)", type=["xls"])
     se_file = st.file_uploader("SE Report (.xls)", type=["xls"])
 
     st.divider()
-    st.header("Inputs — Service Sales (required)")
+    st.header("Inputs — Service Sales (optional)")
     services_file = st.file_uploader("Service Sales report (.xls)", type=["xls"])
-    services_cost_file = st.file_uploader("Services cost (.xlsx) — required", type=["xlsx"])
+    services_cost_file = st.file_uploader("Services cost (.xlsx)", type=["xlsx"])
 
     st.divider()
     include_cleaned = st.checkbox("Include cleaned tabs in Excel output", value=True)
 
-if till_file is None or se_file is None or services_file is None or services_cost_file is None:
-    st.info("Upload Till Report (.xls), SE Report (.xls), Service Sales (.xls), and Services cost (.xlsx) to begin.")
+has_clients = till_file is not None and se_file is not None
+has_services = services_file is not None and services_cost_file is not None
+
+# Helpful guidance if a pair is incomplete
+if (till_file is not None) ^ (se_file is not None):
+    st.warning("To produce Client Statements, upload **both** Till Report and SE Report.")
+if (services_file is not None) ^ (services_cost_file is not None):
+    st.warning("To produce Services Statements, upload **both** Service Sales and Services cost.")
+
+if not (has_clients or has_services):
+    st.info("Upload **Till + SE** and/or **Service Sales + Service Cost** to begin.")
     st.stop()
 
 try:
-    till_df = format_till_report(till_file)
-    se_df = format_se_report(se_file)
-    merged_clients = merge_se_with_till(se_df, till_df)
-    recon = reconciliation_summary(merged_clients)
-    p_start, p_end = statement_period(merged_clients)
+    merged_clients = None
+    recon = None
+    p_start, p_end = "", ""
 
-    services_df = convert_service_sales(services_file, services_cost_file)
+    if has_clients:
+        till_df = format_till_report(till_file)
+        se_df = format_se_report(se_file)
+        merged_clients = merge_se_with_till(se_df, till_df)
+        recon = reconciliation_summary(merged_clients)
+        p_start, p_end = statement_period(merged_clients)
 
-    st.subheader("Reconciliation summary")
-    st.caption("Eyeball check: Cash1 + Deposit should match your other system.")
-    st.dataframe(recon, use_container_width=True)
+        st.subheader("Client Statements — Reconciliation summary")
+        st.dataframe(recon, use_container_width=True)
+        st.subheader("Client Statements — Preview")
+        st.dataframe(merged_clients.head(50), use_container_width=True)
 
-    st.subheader("Merged client output (preview)")
-    st.dataframe(merged_clients.head(50), use_container_width=True)
-    st.subheader("Service sales output (preview)")
-    st.dataframe(services_df.head(50), use_container_width=True)
+    services_df = None
+    if has_services:
+        services_df = convert_service_sales(services_file, services_cost_file)
+        st.subheader("Services Statements — Preview")
+        st.dataframe(services_df.head(50), use_container_width=True)
 
-    excel_buf = io.BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
-        merged_clients.to_excel(writer, index=False, sheet_name="Client Merged Output")
-        recon.to_excel(writer, index=False, sheet_name="Reconciliation Summary")
-        services_df.to_excel(writer, index=False, sheet_name="Service Sales Output")
-        if include_cleaned:
-            se_df.to_excel(writer, index=False, sheet_name="SE Cleaned")
-            till_df.to_excel(writer, index=False, sheet_name="Till Cleaned")
-    excel_buf.seek(0)
+    # ---- OUTPUT EXCEL ----
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        if has_clients:
+            merged_clients.to_excel(writer, index=False, sheet_name="Client Statements")
+            if recon is not None:
+                recon.to_excel(writer, index=False, sheet_name="Reconciliation Summary")
+            if include_cleaned:
+                till_df.to_excel(writer, index=False, sheet_name="Till Cleaned")
+                se_df.to_excel(writer, index=False, sheet_name="SE Cleaned")
 
+        if has_services:
+            services_df.to_excel(writer, index=False, sheet_name="Service Statements")
+            if include_cleaned:
+                # convert_service_sales already outputs final; raw cleaned tabs handled inside its own process historically
+                pass
+
+    out.seek(0)
     st.download_button(
         "Download Excel output (.xlsx)",
-        data=excel_buf,
-        file_name="Touche Statements Output.xlsx",
+        data=out,
+        file_name="Touche Stylist Statements.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
+    # ---- OUTPUT PDFs ----
     st.subheader("PDF statements")
-    if st.button("Generate ZIP of stylist PDFs"):
-        stylists = set(merged_clients["Stylist"].dropna().astype(str))
-        stylists |= set(services_df["Stylist"].dropna().astype(str))
+    st.caption("One PDF per stylist, packaged into a single ZIP.")
+
+    if st.button("Generate ZIP of PDFs"):
+        # Determine stylists from whichever dataset(s) exist
+        stylists = set()
+        if has_clients:
+            stylists |= set(merged_clients["Stylist"].dropna().astype(str).unique())
+        if has_services:
+            stylists |= set(services_df["Stylist"].dropna().astype(str).unique())
+        stylists = sorted(stylists)
 
         zip_buf = io.BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for stylist in sorted(stylists):
-                s_clients = merged_clients[merged_clients["Stylist"] == stylist].copy()
-                s_services = services_df[services_df["Stylist"] == stylist].copy()
+            for stylist in stylists:
+                s_services = services_df[services_df["Stylist"] == stylist].copy() if has_services else None
+                s_clients = merged_clients[merged_clients["Stylist"] == stylist].copy() if has_clients else None
 
                 pdf_bytes = build_stylist_statement_pdf(
                     brand=brand,
@@ -118,14 +153,15 @@ try:
                     services_df=s_services,
                     clients_df=s_clients,
                 )
-                safe = "".join(ch for ch in stylist if ch.isalnum() or ch in (" ","-","_")).strip().replace(" ","_")
+
+                safe = "".join(ch for ch in stylist if ch.isalnum() or ch in (" ", "-", "_")).strip().replace(" ", "_")
                 z.writestr(f"{safe}.pdf", pdf_bytes)
 
         zip_buf.seek(0)
         st.download_button(
             "Download ZIP of PDFs",
             data=zip_buf,
-            file_name="Stylist Statements.zip",
+            file_name="Touche Stylist Statements (PDF).zip",
             mime="application/zip",
         )
 
