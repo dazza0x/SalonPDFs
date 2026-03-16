@@ -16,7 +16,7 @@ from pdfs import build_stylist_statement_pdf
 
 st.set_page_config(page_title="Touche Hairdressing — Statements", page_icon="🧾", layout="centered")
 
-def _maybe_require_password():
+# def _maybe_require_password():
     # Password protection is mandatory for this app.
     if "auth" not in st.secrets or "password" not in st.secrets["auth"]:
         st.error(
