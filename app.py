@@ -16,29 +16,29 @@ from pdfs import build_stylist_statement_pdf
 
 st.set_page_config(page_title="Touche Hairdressing — Statements", page_icon="🧾", layout="centered")
 
-# def _maybe_require_password():
+def _maybe_require_password():
     # Password protection is mandatory for this app.
-if "auth" not in st.secrets or "password" not in st.secrets["auth"]:
-    st.error(
-        "Password protection is not configured. Add an app secret named "
-        "`auth.password` in Streamlit Community Cloud (App settings → Secrets)."
-    )
+    if "auth" not in st.secrets or "password" not in st.secrets["auth"]:
+        st.error(
+            "Password protection is not configured. Add an app secret named "
+            "`auth.password` in Streamlit Community Cloud (App settings → Secrets)."
+        )
+        st.stop()
+    
+    if st.session_state.get("authenticated"):
+        return
+    
+    st.sidebar.subheader("🔒 Access")
+    pw = st.sidebar.text_input("Password", type="password")
+    correct = st.secrets["auth"]["password"]
+    
+    if pw and hmac.compare_digest(pw, correct):
+        st.session_state["authenticated"] = True
+        st.sidebar.success("Access granted")
+        return
+    if pw:
+        st.sidebar.error("Incorrect password")
     st.stop()
-
-if st.session_state.get("authenticated"):
-    return
-
-st.sidebar.subheader("🔒 Access")
-pw = st.sidebar.text_input("Password", type="password")
-correct = st.secrets["auth"]["password"]
-
-if pw and hmac.compare_digest(pw, correct):
-    st.session_state["authenticated"] = True
-    st.sidebar.success("Access granted")
-    return
-if pw:
-    st.sidebar.error("Incorrect password")
-st.stop()
 
 _maybe_require_password()
 
